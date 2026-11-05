@@ -1,0 +1,47 @@
+# docker compose up --build
+# API: http://localhost:3000   Temporal UI: http://localhost:8233
+x-app-env: &app-env
+  REDIS_URL: redis://redis:6379
+  TEMPORAL_ADDRESS: temporal:7233
+  ORCHESTRATOR: temporal
+  # Supplier mocks are served by the API container itself.
+  SUPPLIER_A_URL: http://api:3000/supplierA/hotels
+  SUPPLIER_B_URL: http://api:3000/supplierB/hotels
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  temporal:
+    image: temporalio/temporal:latest
+    command: ["server", "start-dev", "--ip", "0.0.0.0"]
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+
+  api:
+    build: .
+    environment:
+      <<: *app-env
+      PORT: "3000"
+      # SUPPLIER_B_MODE: down   # uncomment to simulate a supplier outage (ok | down | slow)
+    ports: ["3000:3000"]
+    depends_on:
+      redis: { condition: service_healthy }
+      temporal: { condition: service_started }
+    restart: on-failure
+
+  worker:
+    build: .
+    command: ["node", "dist/temporal/worker.js"]
+    environment: *app-env
+    depends_on:
+      redis: { condition: service_healthy }
+      temporal: { condition: service_started }
+    restart: on-failure
